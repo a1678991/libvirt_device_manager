@@ -1,0 +1,86 @@
+# Tasks Log
+
+## Completed Tasks
+
+-   [x] Create initial script to manage passthrough via XML modification.
+-   [x] Use Vendor:Device ID for stable device identification.
+-   [x] Implement automatic IOMMU group handling.
+-   [x] Refactor script to use `libvirt-python` API instead of direct XML file edits.
+-   [x] Add dependency on `libvirt-python` to `requirements.txt`.
+-   [x] Implement diff view of proposed XML changes before application.
+-   [x] Implement user confirmation prompt (`[y/N]`) before applying changes.
+-   [x] Implement flexible device matching criteria (YAML structure with `match` blocks).
+    -   Support matching by `vendor_id`, `device_id`, `vendor_device_id`, `driver`.
+    -   Gather required device details (`lspci`, `/sys`).
+    -   Implement AND logic for criteria within a `match` block.
+-   [x] Normalize XML attribute quotes before diffing to reduce noise.
+-   [x] Create documentation structure (`docs/` folder).
+-   [x] Create `docs/project_overview.md`.
+-   [x] Create `docs/current_status.md`.
+-   [x] Create `docs/tasks.md` (this file).
+-   [x] Create `docs/roadmap.md`.
+-   [x] Add command-line arguments using `argparse`:
+    -   Specify configuration file path (`--config`).
+    -   `--yes` / `-y` flag to skip confirmation prompt.
+    -   `--dry-run` flag to show diffs without prompting or applying.
+    -   Target specific VMs (`--vm <name>`, multiple allowed).
+    -   Save proposed XML for debugging (`--debug-xml <filename>`).
+-   [x] Refactor XML handling to use `lxml` instead of `xml.etree.ElementTree`.
+
+## Pending Tasks
+
+-   **Enhanced Matching Criteria:**
+    -   [ ] Match by PCI Class ID:
+        -   [ ] Modify `get_pci_details` to extract Class ID.
+        -   [ ] Update matching logic for `pci_class_id`.
+        -   [ ] Document `pci_class_id` key.
+    -   [ ] Match by device name/description (regex):
+        -   [ ] Modify `get_pci_details` to extract name/description.
+        -   [ ] Update matching logic for `name`/`description` (with regex).
+        -   [ ] Document `name`/`description` keys.
+-   **Host Driver Management:**
+    -   [ ] Optional: Auto-detach devices from host drivers (`virNodeDeviceDettach`).
+        -   [ ] Add config option (`detach_host_driver: true`).
+        -   [ ] Implement detach logic before adding `<hostdev>`.
+        -   [ ] Store original driver state (metadata or file).
+    -   [ ] Optional: Auto-reattach devices to original drivers (`virNodeDeviceReAttach`).
+        -   [ ] Implement re-attach logic (separate script/hook?).
+        -   [ ] Read stored driver state.
+        -   [ ] Implement re-attach using `virNodeDeviceReAttach`.
+        -   [ ] Document host driver management feature.
+-   **Security:**
+    -   [ ] Review privilege requirements.
+        -   [ ] Analyze operations needing root.
+        -   [ ] Investigate `qemu:///session` feasibility.
+        -   [ ] Explore Polkit/privilege delegation (optional).
+        -   [ ] Document necessary privileges.
+-   **Broader Device Support:**
+    -   [ ] USB passthrough (`<hostdev type='usb'>`):
+        -   [ ] Add USB matching criteria to config.
+        -   [ ] Implement USB device discovery (`lsusb`, `/sys`).
+        -   [ ] Generate USB `<hostdev>` XML.
+        -   [ ] Document USB passthrough.
+    -   [ ] SR-IOV VF assignment (`<interface type='hostdev'>`):
+        -   [ ] Add SR-IOV VF matching criteria to config.
+        -   [ ] Implement PF/VF discovery.
+        -   [ ] Generate SR-IOV `<interface>` XML.
+        -   [ ] Document SR-IOV assignment.
+-   **Improved User Experience:**
+    -   [ ] Add verbose logging options:
+        -   [ ] Integrate `logging` module.
+        -   [ ] Add CLI args (`-v`, `--debug`) for log levels.
+        -   [ ] Replace `print` with `logger` calls.
+-   **Robustness and Testing:**
+    -   [ ] Improve error handling:
+        -   [ ] Define specific custom exceptions.
+        -   [ ] Implement better recovery/fallback.
+    -   [ ] Add unit tests:
+        -   [ ] Set up `pytest`.
+        -   [ ] Write tests for helpers (mocking IO/libvirt).
+    -   [ ] Add integration tests:
+        -   [ ] Design tests requiring libvirt environment.
+        -   [ ] Write end-to-end tests (mocking apply?).
+-   **Workflow Integration:**
+    -   [ ] Add option to ensure VM is off before apply:
+        -   [ ] Add config/CLI flag (`--ensure-vm-off`).
+        -   [ ] Check `dom.state()` before `defineXML()`. 
