@@ -187,87 +187,109 @@ def update_vm_definition(vm_name, vm_config, groups, device_to_group, all_device
     resolution_warnings = 0
     matched_request_indices = set()
 
-    # Iterate through all known devices found on the host
-    for bdf, device_info in all_device_details.items():
-        # Check if this device matches any of the requested criteria sets
-        for idx, request_set in enumerate(passthrough_requests):
-            match_criteria = request_set['match']
+    # Iterate through each request set in the config
+    for idx, request_set in enumerate(passthrough_requests):
+        match_criteria = request_set.get('match', {})
+        if not match_criteria: # Skip empty match blocks
+            continue
+
+        # Find all devices matching this criteria set
+        matching_bdfs = []
+        for bdf, device_info in all_device_details.items():
             matches_all = True
-            if not match_criteria: # Skip empty match blocks
-                matches_all = False
-                continue
-
             for key, value in match_criteria.items():
-                # Compare criteria key with the corresponding key in device_info
-                if key not in device_info:
-                    # We don't issue a warning here anymore, just doesn't match
-                    # print(f"Debug: Key '{key}' not in device_info for {bdf}. Skipping criteria.", file=sys.stderr)
-                    matches_all = False
-                    break # Stop checking this criteria set for this device
+                if key == 'select_index': # Ignore the select_index key for matching
+                    continue
 
-                device_value = device_info.get(key) # Use .get for safety, though check above helps
-                # Simple string comparison for now (case-insensitive)
+                if key not in device_info:
+                    matches_all = False
+                    break
+
+                device_value = device_info.get(key)
+                # Case-insensitive string comparison
                 if isinstance(device_value, str) and isinstance(value, str):
                     if device_value.lower() != value.lower():
                         matches_all = False
-                        break # Stop checking this criteria set for this device
-                elif device_value != value: # Allow comparison for non-string types if added later
-                     matches_all = False
-                     break
+                        break
+                elif device_value != value:
+                    matches_all = False
+                    break
 
-            # If this device matched ALL criteria in the current request_set
             if matches_all:
-                vendor_id = device_info.get('vendor_id', 'N/A')
-                device_id = device_info.get('device_id', 'N/A')
-                print(f"  Device {bdf} ({vendor_id}:{device_id}, driver: {device_info.get('driver', 'None')}) matches criteria set {idx+1}: {match_criteria}")
-                matched_request_indices.add(idx)
+                matching_bdfs.append(bdf)
 
-                # Find the IOMMU group for this matched device
-                group_id = device_to_group.get(bdf)
-                if not group_id:
-                    print(f"Warning: Could not find IOMMU group for matched device {bdf}. Cannot add its group.", file=sys.stderr)
+        # If devices matched this criteria set
+        if matching_bdfs:
+            matched_request_indices.add(idx) # Mark this rule as having found matches
+            # Sort the matched devices by BDF
+            matching_bdfs.sort()
+
+            # Get the selection index (defaulting to 0)
+            select_index_raw = match_criteria.get('select_index', 0)
+            select_index = 0
+            try:
+                select_index = int(select_index_raw)
+                if select_index < 0:
+                    print(f"Warning: select_index for criteria set {idx+1} must be non-negative. Found {select_index_raw}. Using default 0.", file=sys.stderr)
+                    select_index = 0
                     resolution_warnings += 1
-                    continue # Try next request set for this BDF
+            except (ValueError, TypeError):
+                print(f"Warning: Invalid select_index '{select_index_raw}' for criteria set {idx+1}. Must be an integer. Using default 0.", file=sys.stderr)
+                select_index = 0
+                resolution_warnings += 1
 
-                # If this group hasn't been processed yet, add all its devices
+            print(f"  Criteria set {idx+1} {match_criteria} matched {len(matching_bdfs)} device(s): {', '.join(matching_bdfs)}")
+
+            # Select the device based on the index
+            if 0 <= select_index < len(matching_bdfs):
+                selected_bdf = matching_bdfs[select_index]
+                selected_device_info = all_device_details.get(selected_bdf, {})
+                vendor_id = selected_device_info.get('vendor_id', 'N/A')
+                device_id = selected_device_info.get('device_id', 'N/A')
+                print(f"    Selected device at index {select_index}: {selected_bdf} ({vendor_id}:{device_id}, driver: {selected_device_info.get('driver', 'None')})")
+
+                # Find and process the IOMMU group for the *selected* device
+                group_id = device_to_group.get(selected_bdf)
+                if not group_id:
+                    print(f"Warning: Could not find IOMMU group for selected device {selected_bdf}. Cannot add its group.", file=sys.stderr)
+                    resolution_warnings += 1
+                    continue # Move to the next request_set
+
+                # If this group hasn't been processed yet, add its devices
                 if group_id not in processed_groups:
-                    print(f"  Device {bdf} is in IOMMU Group {group_id}.")
+                    print(f"    Selected device {selected_bdf} is in IOMMU Group {group_id}. Adding group devices.")
                     group_devices_bdfs = groups.get(group_id, [])
                     if not group_devices_bdfs:
-                        print(f"Warning: IOMMU group {group_id} associated with {bdf} appears empty in parsed data!", file=sys.stderr)
+                        print(f"Warning: IOMMU group {group_id} associated with {selected_bdf} appears empty!", file=sys.stderr)
                         resolution_warnings += 1
                     else:
-                        print(f"  Checking devices from IOMMU Group {group_id}: {', '.join(group_devices_bdfs)}")
                         # Iterate and filter devices before adding
                         added_from_group = []
                         skipped_count = 0
                         for dev_bdf in group_devices_bdfs:
                             device_details = all_device_details.get(dev_bdf, {})
                             driver = device_details.get('driver')
-                            # Check if the device *itself* is a PCIe bridge/switch (more reliable than checking driver)
-                            # Use lspci to check the class code. Bridges are class 0x06.
-                            # This check might need root if lspci requires it.
-                            # Let's stick to the driver check for now to avoid adding root requirement here.
                             if driver == 'pcieport':
-                                 print(f"    - Skipping {dev_bdf} (driver: pcieport) as it's likely a bridge/switch.")
-                                 skipped_count += 1
-                            # Add other drivers to skip if needed (e.g., 'shpchp'?)
+                                print(f"      - Skipping {dev_bdf} (driver: pcieport) from group {group_id}.")
+                                skipped_count += 1
                             else:
-                                 final_passthrough_bdfs.add(dev_bdf)
-                                 added_from_group.append(dev_bdf)
+                                final_passthrough_bdfs.add(dev_bdf)
+                                added_from_group.append(dev_bdf)
 
                         if added_from_group:
-                            print(f"  Planning to add {len(added_from_group)} device(s) from group {group_id} for {vm_name}: {', '.join(sorted(added_from_group))}")
+                             print(f"    Added {len(added_from_group)} device(s) from group {group_id}: {', '.join(sorted(added_from_group))}")
                         if skipped_count > 0 and not added_from_group:
-                             print(f"Warning: All devices in group {group_id} were skipped (likely bridges/switches). Check if the requested device ({bdf}) is actually usable for passthrough.", file=sys.stderr)
-                             resolution_warnings += 1 # Count this as a potential issue
+                            print(f"Warning: All devices in group {group_id} were skipped (likely bridges/switches). Check if selected device ({selected_bdf}) is usable.", file=sys.stderr)
+                            resolution_warnings += 1 # Count this as a potential issue
 
                         processed_groups.add(group_id)
-                # else: Group already added by a previous match
+                else:
+                    print(f"    IOMMU Group {group_id} (containing selected device {selected_bdf}) was already added by a previous rule.")
 
-                # Continue checking other request sets for the same BDF.
-                # This allows a BDF to satisfy multiple requests if needed, although
-                # its group is added only once.
+            else:
+                print(f"Warning: select_index {select_index} is out of range for the {len(matching_bdfs)} devices matched by criteria set {idx+1}. Skipping this rule.", file=sys.stderr)
+                resolution_warnings += 1
+        # No 'else' needed here for 'if matching_bdfs:', if no devices match, we just move to the next rule.
 
     # Check if any requested criteria sets were not matched by any device
     unmatched_warnings = False

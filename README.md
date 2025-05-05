@@ -74,6 +74,7 @@ vms:
       - match:
           # Criteria set 3 (e.g., identify a specific USB controller by driver)
           driver: "xhci_hcd"
+          select_index: 1
   <vm-name-2>:
     passthrough_devices:
       - match:
@@ -90,7 +91,9 @@ vms:
 *   `passthrough_devices`: A list of device requests for this VM.
 *   `- match:`: Each item in the list represents a request to find and pass through a device (and its IOMMU group).
 *   `key: value`: Inside `match`, specify one or more criteria. All criteria within a single `match` block must be met (AND logic) for a device to be considered a match.
-    *   Supported keys: `vendor_id`, `device_id`, `driver`. Values are case-insensitive strings.
+    *   Supported keys:
+        * `vendor_id`, `device_id`, `driver`: Criteria for matching devices (case-insensitive strings).
+        * `select_index` (Optional, integer, default: `0`): If multiple devices match the criteria, this selects which device (from a list sorted by PCI BDF address) to use for IOMMU group identification. `0` is the first match, `1` is the second, and so on.
 
 If a device matches any `match` block, its entire IOMMU group (excluding `pcieport` devices) will be added to the passthrough list for that VM. The script removes any pre-existing `<hostdev type='pci' mode='subsystem'>` entries before adding the newly determined set.
 
