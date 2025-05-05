@@ -157,4 +157,4 @@ See [docs/roadmap.md](docs/roadmap.md) for the general direction and [docs/tasks
 
 ## License
 
-*(Specify your license, e.g., MIT License)* - Placeholder 
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
