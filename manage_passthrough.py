@@ -3,15 +3,14 @@
 import subprocess
 import os
 import re
-from lxml import etree as ET # Use lxml
-import yaml  # Requires PyYAML installation
+from lxml import etree as ET
+import yaml
 from collections import defaultdict
 import sys
-# import shutil # No longer needed for backup when using API
 import libvirt # Import the libvirt library
-import difflib # For showing differences
-# from xml.dom import minidom # No longer needed? lxml can pretty print
-import argparse # For command-line arguments
+from xmldiff import main as xmldiff_main
+from xmldiff import formatting as xmldiff_formatting
+import argparse
 
 def pretty_print_xml(xml_string):
     """Pretty-prints an XML string using minidom and removes the XML declaration."""
@@ -340,55 +339,92 @@ def update_vm_definition(vm_name, vm_config, groups, device_to_group, all_device
 
         # --- Show Diff and Ask for Confirmation ---
 
-        # Pretty-print both versions *for diffing only*
-        pretty_original_xml = pretty_print_xml(original_xml_string)
-        pretty_modified_xml = pretty_print_xml(modified_xml_string)
+        # Pretty-print both versions *for consistency, though xmldiff works on raw strings*
+        # Use lxml's pretty print capability
+        try:
+            original_root = ET.fromstring(original_xml_string.encode('utf-8'))
+            pretty_original_xml = ET.tostring(original_root, pretty_print=True, encoding='unicode')
+        except ET.XMLSyntaxError:
+            print("Warning: Could not pretty-print original XML for diff.", file=sys.stderr)
+            pretty_original_xml = original_xml_string # Fallback
 
-        # Normalize quotes and spacing on the pretty-printed versions for diffing
-        modified_xml_for_diff = re.sub(r'=(["\'])(.*?)\1', r"='\2'", pretty_modified_xml)
-        original_xml_for_diff = re.sub(r'=(["\'])(.*?)\1', r"='\2'", pretty_original_xml)
-        modified_xml_for_diff = re.sub(r'\s+/>', '/>', modified_xml_for_diff)
-        original_xml_for_diff = re.sub(r'\s+/>', '/>', original_xml_for_diff)
+        try:
+            modified_root = ET.fromstring(modified_xml_string.encode('utf-8'))
+            pretty_modified_xml = ET.tostring(modified_root, pretty_print=True, encoding='unicode')
+        except ET.XMLSyntaxError:
+            print("Warning: Could not pretty-print modified XML for diff.", file=sys.stderr)
+            pretty_modified_xml = modified_xml_string # Fallback
 
-        # Compare the normalized, pretty-printed versions
-        if original_xml_for_diff != modified_xml_for_diff:
-            print("\n" + "-" * 15 + f" Proposed changes for {vm_name} " + "-" * 15)
-            # Note: Diff formatting includes normalization effects
-            print("(Note: Diff ignores attribute quotes and self-closing tag spacing)")
-            diff = difflib.unified_diff(
-                original_xml_for_diff.splitlines(keepends=True),
-                modified_xml_for_diff.splitlines(keepends=True),
-                fromfile='current definition',
-                tofile='proposed definition',
-                lineterm='\n'
-            )
-            sys.stdout.writelines(diff)
-            print("-" * (30 + len(f" Proposed changes for {vm_name} "))) # Match header length
+        # Use xmldiff to compare the potentially modified XML string with the original
+        # We compare the strings directly. xmldiff handles parsing internally.
+        # Let's use the pretty-printed versions for a potentially cleaner diff output,
+        # although xmldiff can handle the compact versions too.
+        if pretty_original_xml != pretty_modified_xml: # Quick check first
+            try:
+                # Use xmldiff's default formatter (similar to unified diff but XML-aware)
+                # Or use XMLFormatter for diff markup embedded in XML
+                formatter = xmldiff_formatting.DiffFormatter() # Or XMLFormatter()
+                diff_result = xmldiff_main.diff_texts(
+                    pretty_original_xml,
+                    pretty_modified_xml,
+                    formatter=formatter
+                )
 
-            if dry_run:
-                print("Dry run requested. No changes will be applied.")
-                return True # Indicate success for dry run completion
+                if diff_result: # Check if xmldiff actually found differences
+                    print("\n" + "-" * 15 + f" Proposed changes for {vm_name} (using xmldiff) " + "-" * 15)
+                    print(diff_result) # Print the formatted diff
+                    print("-" * (30 + len(f" Proposed changes for {vm_name} (using xmldiff) "))) # Match header length
 
-            if non_interactive:
-                print("Non-interactive mode: Assuming Yes.")
-                confirm = 'y'
-            else:
-                try:
-                    confirm = input("Apply these changes? [y/N]: ").strip().lower()
-                except EOFError:
-                    confirm = 'n'
-                    print("\nNo input detected, assuming No.", file=sys.stderr)
+                    if dry_run:
+                        print("Dry run requested. No changes will be applied.")
+                        return True # Indicate success for dry run completion
 
-            if confirm == 'y':
-                print(f"\nApplying updated definition to libvirt for VM '{vm_name}'...")
-                # IMPORTANT: Apply the *original* modified string (from ET.tostring)
-                # not the pretty-printed one, to avoid potential format conflicts.
-                conn.defineXML(modified_xml_string)
-                print(f"Successfully applied changes to '{vm_name}'.")
-            else:
-                print(f"Changes for VM '{vm_name}' aborted by user.")
+                    if non_interactive:
+                        print("Non-interactive mode: Assuming Yes.")
+                        confirm = 'y'
+                    else:
+                        try:
+                            confirm = input("Apply these changes? [y/N]: ").strip().lower()
+                        except EOFError:
+                            confirm = 'n'
+                            print("\nNo input detected, assuming No.", file=sys.stderr)
+
+                    if confirm == 'y':
+                        print(f"\nApplying updated definition to libvirt for VM '{vm_name}'...")
+                        # Apply the *original* modified string (from ET.tostring without pretty print)
+                        conn.defineXML(modified_xml_string)
+                        print(f"Successfully applied changes to '{vm_name}'.")
+                    else:
+                        print(f"Changes for VM '{vm_name}' aborted by user.")
+                else:
+                    # xmldiff didn't find semantic differences, even if strings differed slightly
+                    print(f"  No semantic XML changes detected by xmldiff for VM '{vm_name}'.")
+
+            except Exception as e:
+                print(f"Error during xmldiff generation for VM '{vm_name}': {e}", file=sys.stderr)
+                print("Falling back to simple confirmation without diff.")
+                if dry_run:
+                     print("Dry run requested. No changes will be applied.")
+                     return True
+                if non_interactive:
+                     print("Non-interactive mode: Assuming Yes.")
+                     confirm = 'y'
+                else:
+                    try:
+                        confirm = input(f"Apply potentially modified definition for {vm_name} (diff failed)? [y/N]: ").strip().lower()
+                    except EOFError:
+                        confirm = 'n'
+                        print("\nNo input detected, assuming No.", file=sys.stderr)
+
+                if confirm == 'y':
+                    print(f"\nApplying updated definition to libvirt for VM '{vm_name}' (diff failed)...")
+                    conn.defineXML(modified_xml_string)
+                    print(f"Successfully applied changes to '{vm_name}'.")
+                else:
+                    print(f"Changes for VM '{vm_name}' aborted by user (diff failed).")
+
         else:
-            print(f"  No effective changes detected for VM '{vm_name}' after processing (ignoring quote style and tag spacing).")
+            print(f"  No effective changes detected for VM '{vm_name}' after processing.")
 
         if resolution_warnings > 0:
             print(f"NOTE: There were {resolution_warnings} warnings during device resolution for this VM.")
