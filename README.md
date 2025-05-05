@@ -65,14 +65,15 @@ vms:
     passthrough_devices:
       - match:
           # Criteria set 1 (e.g., identify a specific GPU)
-          vendor_device_id: "10de:1b81" # NVIDIA GeForce GTX 1070
+          vendor_id: "10de"
+          device_id: "1b81" # NVIDIA GeForce GTX 1070
       - match:
           # Criteria set 2 (e.g., identify its audio function)
-          vendor_device_id: "10de:10f0"
+          vendor_id: "10de"
+          device_id: "10f0"
       - match:
           # Criteria set 3 (e.g., identify a specific USB controller by driver)
           driver: "xhci_hcd"
-          # vendor_id: "1b21" # Optional: Further refine if multiple match
   <vm-name-2>:
     passthrough_devices:
       - match:
@@ -89,7 +90,7 @@ vms:
 *   `passthrough_devices`: A list of device requests for this VM.
 *   `- match:`: Each item in the list represents a request to find and pass through a device (and its IOMMU group).
 *   `key: value`: Inside `match`, specify one or more criteria. All criteria within a single `match` block must be met (AND logic) for a device to be considered a match.
-    *   Supported keys: `vendor_id`, `device_id`, `vendor_device_id`, `driver`. Values are case-insensitive strings.
+    *   Supported keys: `vendor_id`, `device_id`, `driver`. Values are case-insensitive strings.
 
 If a device matches any `match` block, its entire IOMMU group (excluding `pcieport` devices) will be added to the passthrough list for that VM. The script removes any pre-existing `<hostdev type='pci' mode='subsystem'>` entries before adding the newly determined set.
 

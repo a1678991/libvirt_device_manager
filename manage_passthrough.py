@@ -33,7 +33,6 @@ def get_pci_details(bdf):
         'bdf': bdf,
         'vendor_id': None,
         'device_id': None,
-        'vendor_device_id': None,
         'driver': None,
         'description': None
     }
@@ -44,7 +43,6 @@ def get_pci_details(bdf):
         if match_vd:
             details['vendor_id'] = match_vd.group(1)
             details['device_id'] = match_vd.group(2)
-            details['vendor_device_id'] = f"{match_vd.group(1)}:{match_vd.group(2)}"
         else:
             # Fallback using lspci -n
             lspci_output_n = subprocess.check_output(['lspci', '-n', '-s', bdf], text=True, stderr=subprocess.DEVNULL).strip()
@@ -52,7 +50,6 @@ def get_pci_details(bdf):
             if match_n_vd:
                 details['vendor_id'] = match_n_vd.group(1)
                 details['device_id'] = match_n_vd.group(2)
-                details['vendor_device_id'] = f"{match_n_vd.group(1)}:{match_n_vd.group(2)}"
             else:
                 print(f"Warning: Could not extract vendor/device ID for {bdf}", file=sys.stderr)
 
@@ -220,7 +217,9 @@ def update_vm_definition(vm_name, vm_config, groups, device_to_group, all_device
 
             # If this device matched ALL criteria in the current request_set
             if matches_all:
-                print(f"  Device {bdf} ({device_info.get('vendor_device_id', 'N/A')}, driver: {device_info.get('driver', 'None')}) matches criteria set {idx+1}: {match_criteria}")
+                vendor_id = device_info.get('vendor_id', 'N/A')
+                device_id = device_info.get('device_id', 'N/A')
+                print(f"  Device {bdf} ({vendor_id}:{device_id}, driver: {device_info.get('driver', 'None')}) matches criteria set {idx+1}: {match_criteria}")
                 matched_request_indices.add(idx)
 
                 # Find the IOMMU group for this matched device
@@ -412,8 +411,10 @@ def apply_libvirt_changes(conn, vm_name, target_bdfs, all_device_details, non_in
 
                 # Print info
                 dev_info_print = all_device_details.get(bdf, {})
+                vendor_id_print = dev_info_print.get('vendor_id', 'N/A')
+                device_id_print = dev_info_print.get('device_id', 'N/A')
                 insert_pos_str = f"at index {actual_insertion_point}" if actual_insertion_point != -1 else "by appending"
-                print(f"    + Adding: {bdf} (Vendor:Device {dev_info_print.get('vendor_device_id', 'N/A')}) {insert_pos_str}")
+                print(f"    + Adding: {bdf} (Vendor:Device {vendor_id_print}:{device_id_print}) {insert_pos_str}")
 
             if added_count > 0:
                  print(f"  Note: Libvirt will assign virtual PCI slots for the {added_count} newly added device(s)." )
