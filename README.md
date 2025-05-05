@@ -24,6 +24,7 @@ Managing VFIO passthrough can be complex. Relying on PCI bus addresses is fragil
 *   **Debugging:** Save the proposed XML for a VM to a file using `--debug-xml <filename>`.
 *   **Intelligent Group Handling:** Skips adding devices likely to be PCI bridges/switches (those using the `pcieport` driver) from IOMMU groups.
 *   **Uses `lxml`:** Leverages the `lxml` library for robust XML parsing.
+*   **Minimized XML Diffs:** Preserves existing `<hostdev>` definitions when possible to reduce noise in configuration changes.
 
 ## Dependencies
 
@@ -127,8 +128,11 @@ sudo ./manage_passthrough.py -y
     a.  **Match Devices:** Compares host devices against the `passthrough_devices` criteria defined for the VM.
     b.  **Resolve IOMMU Groups:** Identifies the full IOMMU groups for all matched devices.
     c.  **Fetch Current XML:** Connects to libvirt and retrieves the current XML definition for the VM.
-    d.  **Calculate New XML:** Removes existing PCI `<hostdev>` entries and adds new ones based on the resolved IOMMU group devices.
-    e.  **Generate Diff:** Compares the original XML with the proposed new XML using `xmldiff`.
+    d.  **Calculate New XML:** Compares the target devices (from config + IOMMU groups) with the existing PCI `<hostdev>` entries in the VM's XML.
+       *   Removes `<hostdev>` elements for devices no longer specified in the target set.
+       *   Adds new `<hostdev>` elements only for devices newly specified in the target set (libvirt will assign virtual slots).
+       *   Keeps existing `<hostdev>` elements untouched if the device remains in the target set, preserving their virtual PCI slot assignments.
+    e.  **Generate Diff:** Compares the original XML with the proposed new XML using `difflib` (after pretty-printing both). The goal is to only show meaningful additions/removals.
     f.  **Confirm & Apply:** If not in `--dry-run` mode, displays the diff, prompts for confirmation (unless `-y` is used), and if confirmed, uses `conn.defineXML()` to update the VM definition in libvirt.
 
 ## Development Status
