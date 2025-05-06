@@ -20,8 +20,8 @@ jobs:
     steps:
       - name: Install dependencies
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends qemu-kvm libvirt-daemon-system
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-kvm libvirt-daemon-system
       - uses: actions/checkout@v4
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v3
